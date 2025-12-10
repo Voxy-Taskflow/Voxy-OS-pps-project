@@ -1,0 +1,5 @@
+*.o
+*.bin
+disk.img
+*.swp
+*~
