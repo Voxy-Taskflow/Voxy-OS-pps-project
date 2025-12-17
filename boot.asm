@@ -11,9 +11,9 @@ start:
     mov si, msg_load
     call print_string
 
-    ; Load 33 sectors
+    ; Load 41 sectors
     mov ah, 0x02
-    mov al, 33          ; Load 33 sectors
+    mov al, 41          ; Load 41 sectors
     mov ch, 0
     mov cl, 2
     mov dh, 0

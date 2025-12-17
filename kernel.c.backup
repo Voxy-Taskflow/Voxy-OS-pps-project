@@ -1,18 +1,4 @@
 // VoxyOS v0.1 - Final polished version
-#include "idt.h"
-extern void isr_keyboard(void);
-extern void isr_keyboard(void);
-extern void pic_init(void);
-extern unsigned int interrupt_count;
-extern void isr_timer(void);
-extern void get_time_string(char* buffer);
-extern unsigned int get_uptime_seconds(void);
-extern int status_bar_needs_update;
-extern void play_startup_sound(void);
-extern void play_error_sound(void);
-extern void play_success_sound(void);
-extern void beep(unsigned int freq, unsigned int dur);  
-extern int ata_read_sector(unsigned int lba, unsigned char* buffer);
 
 #define VGA_MEMORY 0xB8000
 #define VGA_WIDTH 80
@@ -54,23 +40,17 @@ static struct file ramdisk[MAX_FILES];
 static unsigned short* vga = (unsigned short*)VGA_MEMORY;
 static int cursor_x = 0;
 static int cursor_y = 0;
-char cmd_buffer[CMD_BUFFER_SIZE];
-int cmd_len = 0;
+static char cmd_buffer[CMD_BUFFER_SIZE];
+static int cmd_len = 0;
 static unsigned char current_color = (COLOR_BLACK << 4) | COLOR_LIGHT_GRAY;
 
 static char editor_buffer[EDITOR_BUFFER_SIZE];
 static int editor_len = 0;
 static int editor_active = 0;
 static char current_filename[FILENAME_LEN];
-static unsigned int rand_seed = 0;
-
+static unsigned int rand_seed = 12345;
 
 unsigned int rand(void) {
-    // Seed with timer tick if not initialized
-    if (rand_seed == 0) {
-        extern unsigned int tick_count;
-        rand_seed = tick_count + 12345;  // Add offset to avoid 0
-    }
     rand_seed = rand_seed * 1103515245 + 12345;
     return (rand_seed / 65536) % 32768;
 }
@@ -79,10 +59,6 @@ unsigned char inb(unsigned short port) {
     unsigned char result;
     __asm__ volatile ("inb %1, %0" : "=a"(result) : "Nd"(port));
     return result;
-}
-
-void outb(unsigned short port, unsigned char data) {
-    __asm__ volatile ("outb %0, %1" : : "a"(data), "Nd"(port));
 }
 
 void set_color(unsigned char fg, unsigned char bg) {
@@ -140,30 +116,14 @@ void draw_status_bar(void) {
         x++;
     }
     
-    const char* suffix = " | ";
+    const char* suffix = " | Type 'help' ";
     while (*suffix && x < VGA_WIDTH) {
         vga[bar_y * VGA_WIDTH + x] = (bar_color << 8) | *suffix;
         suffix++;
         x++;
     }
-    
-    // Add clock
-    char time_str[16];
-    get_time_string(time_str);
-    int j = 0;
-    while (time_str[j] && x < VGA_WIDTH) {
-        vga[bar_y * VGA_WIDTH + x] = (bar_color << 8) | time_str[j];
-        j++;
-        x++;
-    }
-    
-    const char* suffix2 = " | Type 'help' ";
-    while (*suffix2 && x < VGA_WIDTH) {
-        vga[bar_y * VGA_WIDTH + x] = (bar_color << 8) | *suffix2;
-        suffix2++;
-        x++;
-    }
 }
+
 void scroll(void) {
     for (int i = 0; i < (VGA_HEIGHT - 2) * VGA_WIDTH; i++) {
         vga[i] = vga[i + VGA_WIDTH];
@@ -403,7 +363,6 @@ void game_run(void) {
         attempts++;
         
         if (guess == secret) {
-            play_success_sound();
             set_color(COLOR_LIGHT_GREEN, COLOR_BLACK);
             print_string("*** CORRECT! *** You won in ");
             print_number(attempts);
@@ -536,13 +495,10 @@ void cmd_help(void) {
     print_string("  rm <file>    Delete file\n");
     print_string("  ls           List files\n");
     print_string("  game         Number guessing game\n");
-    print_string("  stats        Show interrupt statistics\n");
-    print_string("  disktest     Test ATA disk read\n");
 }
 
 void cmd_clear(void) {
     clear_screen();
-    beep(1000, 50);
     draw_status_bar();
 }
 
@@ -587,51 +543,6 @@ void cmd_ls(void) {
     if (count == 0) {
         set_color(COLOR_DARK_GRAY, COLOR_BLACK);
         print_string("  (empty)\n");
-        reset_color();
-    }
-}
-void cmd_stats(void) {
-    set_color(COLOR_LIGHT_CYAN, COLOR_BLACK);
-    print_string("=== System Statistics ===\n");
-    reset_color();
-    print_string("Keyboard interrupts: ");
-    print_number(interrupt_count);
-    print_char('\n');
-    print_string("Uptime: ");
-    print_number(get_uptime_seconds());
-    print_string(" seconds\n");
-}
-void cmd_disktest(void) {
-    set_color(COLOR_YELLOW, COLOR_BLACK);
-    print_string("Testing ATA disk read...\n");
-    reset_color();
-    
-    unsigned char buffer[512];
-    
-    // Try to read sector 0 (boot sector)
-    print_string("Reading boot sector (LBA 0)...\n");
-    int result = ata_read_sector(50, buffer);
-    
-    if (result == 0) {
-        set_color(COLOR_LIGHT_GREEN, COLOR_BLACK);
-        print_string("[OK] Read successful!\n");
-        reset_color();
-        
-        // Show first 64 bytes
-        print_string("First 64 bytes:\n");
-        for (int i = 0; i < 64; i++) {
-            if (i % 16 == 0) print_char('\n');
-            
-            // Print hex byte
-            char hex[] = "0123456789ABCDEF";
-            print_char(hex[(buffer[i] >> 4) & 0x0F]);
-            print_char(hex[buffer[i] & 0x0F]);
-            print_char(' ');
-        }
-        print_char('\n');
-    } else {
-        set_color(COLOR_LIGHT_RED, COLOR_BLACK);
-        print_string("[ERROR] Disk read failed!\n");
         reset_color();
     }
 }
@@ -730,16 +641,7 @@ void execute_command(void) {
         cmd_ls();
     } else if (strcmp(cmd_buffer, "game") == 0) {
         game_run();
-    } else if (strcmp(cmd_buffer, "stats") == 0) {
-        cmd_stats();
-    }
-    else if (strcmp(cmd_buffer, "disktest") == 0)
-    {
-        cmd_disktest();
-    }
-    
-    else {
-        play_error_sound(); 
+    } else {
         set_color(COLOR_LIGHT_RED, COLOR_BLACK);
         print_string("[ERROR] Unknown command: ");
         print_string(cmd_buffer);
@@ -755,12 +657,6 @@ void kernel_main(void) {
     for (int i = 0; i < MAX_FILES; i++) {
         ramdisk[i].used = 0;
     }
-    // Initialize IDT and interrupts
-    idt_init();
-    pic_init();
-    idt_set_gate(32, (unsigned int)isr_timer, 0x08, 0x8E);      // IRQ0 = INT 32 (Timer)
-    idt_set_gate(33, (unsigned int)isr_keyboard, 0x08, 0x8E);  // IRQ1 = INT 33 (Keyboard)
-    __asm__ volatile("sti");
     
     clear_screen();
     
@@ -784,8 +680,6 @@ void kernel_main(void) {
     print_string("                Type 'help' for available commands\n\n");
     reset_color();
     
-    play_startup_sound();
-
     draw_status_bar();
     
     set_color(COLOR_LIGHT_GREEN, COLOR_BLACK);
@@ -796,37 +690,31 @@ void kernel_main(void) {
     current_filename[0] = '\0';
     
     while (1) {
-        __asm__ volatile("hlt");  // Wait for keyboard interrupt
-        
-        // Update status bar if timer signals
-        if (status_bar_needs_update) {
-            status_bar_needs_update = 0;
-            draw_status_bar();
-        }
-        
-        // Echo any new characters in buffer
-        static int last_cmd_len = 0;
-        if (cmd_len > last_cmd_len) {
-            // New character added - echo it
-            char c = cmd_buffer[cmd_len - 1];
-            print_char(c);
-            last_cmd_len = cmd_len;
-        } else if (cmd_len < last_cmd_len) {
-            // Backspace - erase character
-            print_char('\b');
-            last_cmd_len = cmd_len;
-        }
-        
-        // Check if Enter was pressed
-        if (cmd_len > 0 && cmd_buffer[cmd_len - 1] == '\n') {
-            cmd_buffer[cmd_len - 1] = '\0';  // Remove newline
-            execute_command();
-            draw_status_bar();
-            set_color(COLOR_LIGHT_GREEN, COLOR_BLACK);
-            print_string("> ");
-            reset_color();
-            cmd_len = 0;
-            last_cmd_len = 0;
+        unsigned char status = inb(KEYBOARD_STATUS_PORT);
+        if (status & 0x01) {
+            unsigned char scancode = inb(KEYBOARD_DATA_PORT);
+            
+            if (!(scancode & 0x80)) {
+                char c = scancode_to_ascii(scancode);
+                
+                if (c == '\n') {
+                    print_char('\n');
+                    execute_command();
+                    draw_status_bar();
+                    set_color(COLOR_LIGHT_GREEN, COLOR_BLACK);
+                    print_string("> ");
+                    reset_color();
+                    cmd_len = 0;
+                } else if (c == '\b') {
+                    if (cmd_len > 0) {
+                        cmd_len--;
+                        print_char('\b');
+                    }
+                } else if (c && cmd_len < CMD_BUFFER_SIZE - 1) {
+                    cmd_buffer[cmd_len++] = c;
+                    print_char(c);
+                }
+            }
         }
     }
 }

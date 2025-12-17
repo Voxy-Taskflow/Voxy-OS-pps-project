@@ -1,0 +1,19 @@
+// Add this after your existing #define statements (around line 30)
+#include "idt.h"
+
+// Declare the test ISR from assembly
+extern void isr_test(void);
+
+// Add this function before kernel_main (around line 400)
+void test_interrupts(void) {
+    set_color(COLOR_YELLOW, COLOR_BLACK);
+    print_string("\n[TEST] Triggering software interrupt (INT 0x80)...\n");
+    reset_color();
+    
+    // Trigger test interrupt
+    __asm__ volatile("int $0x80");
+    
+    set_color(COLOR_LIGHT_GREEN, COLOR_BLACK);
+    print_string("[TEST] Interrupt returned successfully!\n");
+    reset_color();
+}
