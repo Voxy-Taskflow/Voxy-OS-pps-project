@@ -20,6 +20,10 @@ extern int diskfs_load_file(const char* filename, char* buffer, int max_size);
 extern int diskfs_delete_file(const char* filename);                   
 extern int diskfs_count_files(void);                                   
 extern int diskfs_get_file_info(int index, char* name, int* size); 
+extern void animate_boot(void);  
+extern void draw_box(int x, int y, int width, int height, unsigned char fg, unsigned char bg);
+extern void show_message_box(const char* title, const char* message, unsigned char fg, unsigned char bg);
+extern void draw_text_in_box(int x, int y, const char* text, unsigned char fg, unsigned char bg);
 
 #define VGA_MEMORY 0xB8000
 #define VGA_WIDTH 80
@@ -52,9 +56,9 @@ extern int diskfs_get_file_info(int index, char* name, int* size);
 
 
 
-static unsigned short* vga = (unsigned short*)VGA_MEMORY;
-static int cursor_x = 0;
-static int cursor_y = 0;
+unsigned short* vga = (unsigned short*)VGA_MEMORY;
+int cursor_x = 0;
+int cursor_y = 0;
 char cmd_buffer[CMD_BUFFER_SIZE];
 int cmd_len = 0;
 static unsigned char current_color = (COLOR_BLACK << 4) | COLOR_LIGHT_GRAY;
@@ -485,12 +489,58 @@ void cmd_help(void) {
     print_string("  stats        Show interrupt statistics\n");
     print_string("  disktest     Test ATA disk read\n");
     print_string("  diskwrite    Test ATA disk write\n");  
+    print_string("  uidemo       UI box drawing demo\n");  
 }
 
 void cmd_clear(void) {
     clear_screen();
     beep(1000, 50);
     draw_status_bar();
+}
+void cmd_uidemo(void) {
+    clear_screen();
+    
+    set_color(COLOR_YELLOW, COLOR_BLACK);
+    print_string("=== UI Demo - Box Drawing ===\n\n");
+    reset_color();
+    
+    // Draw multiple boxes
+    draw_box(5, 3, 30, 8, 0xB, 0x1);   // Cyan on blue
+    draw_text_in_box(8, 5, "Box 1: Cyan Border", 0xF, 0x1);
+    
+    draw_box(40, 3, 35, 8, 0xE, 0x4);  // Yellow on red
+    draw_text_in_box(43, 5, "Box 2: Yellow Border", 0xF, 0x4);
+    
+    draw_box(5, 12, 70, 6, 0xA, 0x0);  // Green on black
+    draw_text_in_box(8, 14, "Box 3: This is a larger box with green borders!", 0xF, 0x0);
+    
+    cursor_x = 0;
+    cursor_y = 19;
+    print_string("\nPress 'M' for message box, any other key to return...\n");
+    
+    // Wait for key
+    while (1) {
+        unsigned char status = inb(KEYBOARD_STATUS_PORT);
+        if (status & 0x01) {
+            unsigned char scancode = inb(KEYBOARD_DATA_PORT);
+            if (!(scancode & 0x80)) {
+                if (scancode == 0x32) {  // M key
+                    show_message_box("VoxyOS Message", "This is a fancy dialog box!", 0xE, 0x1);
+                    // Wait for another key
+                    while (1) {
+                        unsigned char s = inb(KEYBOARD_STATUS_PORT);
+                        if (s & 0x01) {
+                            inb(KEYBOARD_DATA_PORT);
+                            break;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+    
+    clear_screen();
 }
 
 void cmd_about(void) {
@@ -761,6 +811,8 @@ void execute_command(void) {
     }
     else if (strcmp(cmd_buffer, "diskwrite") == 0) {  
         cmd_diskwrite();
+    }else if (strcmp(cmd_buffer, "uidemo") == 0) {  
+        cmd_uidemo();                                 
     }
     else {
         play_error_sound(); 
@@ -779,10 +831,6 @@ void kernel_main(void) {
     // Initialize IDT and interrupts
     idt_init();
     pic_init();
-    // Initialize disk filesystem
-    set_color(COLOR_DARK_GRAY, COLOR_BLACK);
-    print_string("[BOOT] Initializing disk filesystem...\n");
-    reset_color();
     if (diskfs_init() != 0) {
         set_color(COLOR_YELLOW, COLOR_BLACK);
         print_string("[WARN] Filesystem not found, creating new...\n");
@@ -792,6 +840,9 @@ void kernel_main(void) {
     idt_set_gate(33, (unsigned int)isr_keyboard, 0x08, 0x8E);  // IRQ1 = INT 33 (Keyboard)
     __asm__ volatile("sti");
     
+    // Animated boot sequence
+    //animate_boot();  //FIX IN FUTURE
+
     clear_screen();
     
     // Simple, clean ASCII logo

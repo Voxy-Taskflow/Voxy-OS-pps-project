@@ -34,6 +34,12 @@ timer.o: timer.c
 diskfs.o: diskfs.c
 	gcc -m32 -ffreestanding -c diskfs.c -o diskfs.o -nostdlib -fno-pie -O2
 
+bootanim.o: bootanim.c
+	gcc -m32 -ffreestanding -c bootanim.c -o bootanim.o -nostdlib -fno-pie -O2
+
+ui.o: ui.c
+	gcc -m32 -ffreestanding -c ui.c -o ui.o -nostdlib -fno-pie -O2
+
 kernel.o: kernel.c idt.h
 	gcc -m32 -ffreestanding -c kernel.c -o kernel.o -nostdlib -fno-pie -O2
 
@@ -43,8 +49,8 @@ speaker.o: speaker.c
 ata.o: ata.c ata.h
 	gcc -m32 -ffreestanding -c ata.c -o ata.o -nostdlib -fno-pie -O2
 
-kernel.bin: kernel_entry.o kernel.o idt.o idt_load.o isr_keyboard.o isr_timer.o keyboard.o timer.o pic.o speaker.o ata.o diskfs.o
-	ld -m elf_i386 -Ttext 0x1000 --oformat binary -e _start -o kernel.bin kernel_entry.o kernel.o idt.o idt_load.o isr_keyboard.o isr_timer.o keyboard.o timer.o pic.o speaker.o ata.o diskfs.o
+kernel.bin: kernel_entry.o kernel.o idt.o idt_load.o isr_keyboard.o isr_timer.o keyboard.o timer.o pic.o speaker.o ata.o diskfs.o bootanim.o ui.o
+	ld -m elf_i386 -Ttext 0x1000 --oformat binary -e _start -o kernel.bin kernel_entry.o kernel.o idt.o idt_load.o isr_keyboard.o isr_timer.o keyboard.o timer.o pic.o speaker.o ata.o diskfs.o bootanim.o ui.o
 
 disk.img: boot.bin kernel.bin
 	dd if=/dev/zero of=disk.img bs=512 count=2048 2>/dev/null
