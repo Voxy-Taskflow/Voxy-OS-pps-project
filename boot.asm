@@ -13,7 +13,7 @@ start:
 
     ; Load 41 sectors
     mov ah, 0x02
-    mov al, 41          ; Load 41 sectors
+    mov al, 49          ; Load 49 sectors
     mov ch, 0
     mov cl, 2
     mov dh, 0

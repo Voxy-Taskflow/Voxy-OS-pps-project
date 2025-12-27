@@ -13,6 +13,13 @@ extern void play_error_sound(void);
 extern void play_success_sound(void);
 extern void beep(unsigned int freq, unsigned int dur);  
 extern int ata_read_sector(unsigned int lba, unsigned char* buffer);
+extern int ata_write_sector(unsigned int lba, unsigned char* buffer);
+extern int diskfs_init(void);                                          
+extern int diskfs_save_file(const char* filename, const char* data, int size);  
+extern int diskfs_load_file(const char* filename, char* buffer, int max_size);  
+extern int diskfs_delete_file(const char* filename);                   
+extern int diskfs_count_files(void);                                   
+extern int diskfs_get_file_info(int index, char* name, int* size); 
 
 #define VGA_MEMORY 0xB8000
 #define VGA_WIDTH 80
@@ -43,14 +50,8 @@ extern int ata_read_sector(unsigned int lba, unsigned char* buffer);
 #define COLOR_YELLOW 0xE
 #define COLOR_WHITE 0xF
 
-struct file {
-    char filename[FILENAME_LEN];
-    char data[MAX_FILE_SIZE];
-    int size;
-    int used;
-};
 
-static struct file ramdisk[MAX_FILES];
+
 static unsigned short* vga = (unsigned short*)VGA_MEMORY;
 static int cursor_x = 0;
 static int cursor_y = 0;
@@ -103,10 +104,7 @@ void clear_screen(void) {
 }
 
 void draw_status_bar(void) {
-    int file_count = 0;
-    for (int i = 0; i < MAX_FILES; i++) {
-        if (ramdisk[i].used) file_count++;
-    }
+    int file_count = diskfs_count_files();
     
     int bar_y = VGA_HEIGHT - 1;
     unsigned char bar_color = (COLOR_CYAN << 4) | COLOR_BLACK;
@@ -291,58 +289,6 @@ char scancode_to_ascii(unsigned char scancode) {
     return 0;
 }
 
-int fs_find_file(const char* filename) {
-    for (int i = 0; i < MAX_FILES; i++) {
-        if (ramdisk[i].used && strcmp(ramdisk[i].filename, filename) == 0) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-int fs_save_file(const char* filename, const char* data, int size) {
-    if (size > MAX_FILE_SIZE) return -1;
-    
-    int idx = fs_find_file(filename);
-    
-    if (idx == -1) {
-        for (int i = 0; i < MAX_FILES; i++) {
-            if (!ramdisk[i].used) {
-                idx = i;
-                break;
-            }
-        }
-    }
-    
-    if (idx == -1) return -2;
-    
-    strcpy(ramdisk[idx].filename, filename);
-    memcpy(ramdisk[idx].data, data, size);
-    ramdisk[idx].size = size;
-    ramdisk[idx].used = 1;
-    
-    return 0;
-}
-
-int fs_load_file(const char* filename, char* buffer, int max_size) {
-    int idx = fs_find_file(filename);
-    if (idx == -1) return -1;
-    
-    int copy_size = ramdisk[idx].size;
-    if (copy_size > max_size) copy_size = max_size;
-    
-    memcpy(buffer, ramdisk[idx].data, copy_size);
-    return copy_size;
-}
-
-int fs_delete_file(const char* filename) {
-    int idx = fs_find_file(filename);
-    if (idx == -1) return -1;
-    
-    ramdisk[idx].used = 0;
-    return 0;
-}
-
 void game_run(void) {
     clear_screen();
     set_color(COLOR_YELLOW, COLOR_BLACK);
@@ -447,7 +393,7 @@ void editor_run(void) {
         print_char('\n');
         reset_color();
         
-        int loaded = fs_load_file(current_filename, editor_buffer, EDITOR_BUFFER_SIZE);
+        int loaded = diskfs_load_file(current_filename, editor_buffer, EDITOR_BUFFER_SIZE);
         if (loaded > 0) {
             editor_len = loaded;
             set_color(COLOR_GREEN, COLOR_BLACK);
@@ -477,7 +423,7 @@ void editor_run(void) {
                     editor_active = 0;
                     
                     if (strlen(current_filename) > 0) {
-                        int result = fs_save_file(current_filename, editor_buffer, editor_len);
+                        int result = diskfs_save_file(current_filename, editor_buffer, editor_len);
                         clear_screen();
                         if (result == 0) {
                             set_color(COLOR_LIGHT_GREEN, COLOR_BLACK);
@@ -538,6 +484,7 @@ void cmd_help(void) {
     print_string("  game         Number guessing game\n");
     print_string("  stats        Show interrupt statistics\n");
     print_string("  disktest     Test ATA disk read\n");
+    print_string("  diskwrite    Test ATA disk write\n");  
 }
 
 void cmd_clear(void) {
@@ -564,30 +511,33 @@ void cmd_about(void) {
 }
 
 void cmd_ls(void) {
-    int count = 0;
+    int count = diskfs_count_files();
     set_color(COLOR_LIGHT_CYAN, COLOR_BLACK);
-    print_string("Files in RAM disk:\n");
+    print_string("Files on disk:\n");
     reset_color();
-    
-    for (int i = 0; i < MAX_FILES; i++) {
-        if (ramdisk[i].used) {
-            set_color(COLOR_LIGHT_GREEN, COLOR_BLACK);
-            print_string("  * ");
-            reset_color();
-            print_string(ramdisk[i].filename);
-            set_color(COLOR_DARK_GRAY, COLOR_BLACK);
-            print_string("  (");
-            print_number(ramdisk[i].size);
-            print_string(" bytes)\n");
-            reset_color();
-            count++;
-        }
-    }
     
     if (count == 0) {
         set_color(COLOR_DARK_GRAY, COLOR_BLACK);
         print_string("  (empty)\n");
         reset_color();
+        return;
+    }
+    
+    char filename[FILENAME_LEN];
+    int size;
+    
+    for (int i = 0; i < count; i++) {
+        if (diskfs_get_file_info(i, filename, &size) == 0) {
+            set_color(COLOR_LIGHT_GREEN, COLOR_BLACK);
+            print_string("  * ");
+            reset_color();
+            print_string(filename);
+            set_color(COLOR_DARK_GRAY, COLOR_BLACK);
+            print_string("  (");
+            print_number(size);
+            print_string(" bytes)\n");
+            reset_color();
+        }
     }
 }
 void cmd_stats(void) {
@@ -601,6 +551,78 @@ void cmd_stats(void) {
     print_number(get_uptime_seconds());
     print_string(" seconds\n");
 }
+void cmd_diskwrite(void) {
+    set_color(COLOR_YELLOW, COLOR_BLACK);
+    print_string("Testing ATA disk write...\n");
+    reset_color();
+    
+    unsigned char write_buffer[512];
+    unsigned char read_buffer[512];
+    
+    // Fill buffer with test pattern
+    for (int i = 0; i < 512; i++) {
+        write_buffer[i] = i & 0xFF;  // 0-255 repeating pattern
+    }
+    
+    // Write to sector 100 (safe test location)
+    print_string("Writing test pattern to sector 100...\n");
+    int result = ata_write_sector(100, write_buffer);
+    
+    if (result != 0) {
+        set_color(COLOR_LIGHT_RED, COLOR_BLACK);
+        print_string("[ERROR] Write failed!\n");
+        reset_color();
+        return;
+    }
+    
+    set_color(COLOR_LIGHT_GREEN, COLOR_BLACK);
+    print_string("[OK] Write successful!\n");
+    reset_color();
+    
+    // Read it back to verify
+    print_string("Reading back sector 100...\n");
+    result = ata_read_sector(100, read_buffer);
+    
+    if (result != 0) {
+        set_color(COLOR_LIGHT_RED, COLOR_BLACK);
+        print_string("[ERROR] Read failed!\n");
+        reset_color();
+        return;
+    }
+    
+    // Verify data matches
+    int mismatches = 0;
+    for (int i = 0; i < 512; i++) {
+        if (write_buffer[i] != read_buffer[i]) {
+            mismatches++;
+        }
+    }
+    
+    if (mismatches == 0) {
+        set_color(COLOR_LIGHT_GREEN, COLOR_BLACK);
+        print_string("[OK] Verification passed! Data persists!\n");
+        play_success_sound();
+        reset_color();
+        
+        // Show first 64 bytes
+        print_string("First 64 bytes:\n");
+        for (int i = 0; i < 64; i++) {
+            if (i % 16 == 0) print_char('\n');
+            char hex[] = "0123456789ABCDEF";
+            print_char(hex[(read_buffer[i] >> 4) & 0x0F]);
+            print_char(hex[read_buffer[i] & 0x0F]);
+            print_char(' ');
+        }
+        print_char('\n');
+    } else {
+        set_color(COLOR_LIGHT_RED, COLOR_BLACK);
+        print_string("[ERROR] Verification failed! Mismatches: ");
+        print_number(mismatches);
+        print_char('\n');
+        play_error_sound();
+        reset_color();
+    }
+}
 void cmd_disktest(void) {
     set_color(COLOR_YELLOW, COLOR_BLACK);
     print_string("Testing ATA disk read...\n");
@@ -610,7 +632,7 @@ void cmd_disktest(void) {
     
     // Try to read sector 0 (boot sector)
     print_string("Reading boot sector (LBA 0)...\n");
-    int result = ata_read_sector(50, buffer);
+    int result = ata_read_sector(100, buffer);
     
     if (result == 0) {
         set_color(COLOR_LIGHT_GREEN, COLOR_BLACK);
@@ -645,7 +667,7 @@ void cmd_cat(const char* filename) {
     }
     
     char buffer[MAX_FILE_SIZE];
-    int size = fs_load_file(filename, buffer, MAX_FILE_SIZE);
+    int size = diskfs_load_file(filename, buffer, MAX_FILE_SIZE);
     
     if (size < 0) {
         set_color(COLOR_LIGHT_RED, COLOR_BLACK);
@@ -676,7 +698,7 @@ void cmd_rm(const char* filename) {
         return;
     }
     
-    int result = fs_delete_file(filename);
+    int result = diskfs_delete_file(filename);
     if (result == 0) {
         set_color(COLOR_LIGHT_GREEN, COLOR_BLACK);
         print_string("[OK] Deleted: ");
@@ -737,7 +759,9 @@ void execute_command(void) {
     {
         cmd_disktest();
     }
-    
+    else if (strcmp(cmd_buffer, "diskwrite") == 0) {  
+        cmd_diskwrite();
+    }
     else {
         play_error_sound(); 
         set_color(COLOR_LIGHT_RED, COLOR_BLACK);
@@ -752,12 +776,18 @@ void execute_command(void) {
 }
 
 void kernel_main(void) {
-    for (int i = 0; i < MAX_FILES; i++) {
-        ramdisk[i].used = 0;
-    }
     // Initialize IDT and interrupts
     idt_init();
     pic_init();
+    // Initialize disk filesystem
+    set_color(COLOR_DARK_GRAY, COLOR_BLACK);
+    print_string("[BOOT] Initializing disk filesystem...\n");
+    reset_color();
+    if (diskfs_init() != 0) {
+        set_color(COLOR_YELLOW, COLOR_BLACK);
+        print_string("[WARN] Filesystem not found, creating new...\n");
+        reset_color();
+    }
     idt_set_gate(32, (unsigned int)isr_timer, 0x08, 0x8E);      // IRQ0 = INT 32 (Timer)
     idt_set_gate(33, (unsigned int)isr_keyboard, 0x08, 0x8E);  // IRQ1 = INT 33 (Keyboard)
     __asm__ volatile("sti");

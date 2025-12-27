@@ -86,8 +86,46 @@ int ata_read_sector(unsigned int lba, unsigned char* buffer) {
     return 0;  // Success
 }
 
-// Write sector (stub for now)
+// Write a sector to disk
 int ata_write_sector(unsigned int lba, unsigned char* buffer) {
-    // TODO: Implement tomorrow
-    return -1;
+    // Wait for drive to be ready
+    if (ata_wait_ready() != 0) {
+        return -1;  // Drive not ready
+    }
+    
+    // Select drive and set LBA mode
+    outb(ATA_PRIMARY_DRIVE_HEAD, 0xE0 | ((lba >> 24) & 0x0F));
+    
+    // Set sector count to 1
+    outb(ATA_PRIMARY_SECCOUNT, 1);
+    
+    // Set LBA address
+    outb(ATA_PRIMARY_LBA_LO, lba & 0xFF);
+    outb(ATA_PRIMARY_LBA_MID, (lba >> 8) & 0xFF);
+    outb(ATA_PRIMARY_LBA_HI, (lba >> 16) & 0xFF);
+    
+    // Send WRITE command
+    outb(ATA_PRIMARY_COMMAND, ATA_CMD_WRITE_PIO);
+    
+    // Wait for drive to be ready for data
+    if (ata_wait_ready() != 0) {
+        return -1;
+    }
+    
+    // Write 256 words (512 bytes)
+    unsigned short* buf = (unsigned short*)buffer;
+    for (int i = 0; i < 256; i++) {
+        // Write word to data port
+        __asm__ volatile("outw %0, %1" : : "a"(buf[i]), "Nd"((unsigned short)ATA_PRIMARY_DATA));
+    }
+    
+    // Flush cache
+    outb(ATA_PRIMARY_COMMAND, 0xE7);  // CACHE FLUSH command
+    
+    // Wait for completion
+    if (ata_wait_ready() != 0) {
+        return -1;
+    }
+    
+    return 0;  // Success
 }
